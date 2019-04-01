@@ -1,6 +1,8 @@
 from socket import socket, AF_INET, SOCK_STREAM, SOL_SOCKET, SO_REUSEADDR
 from selectors import DefaultSelector, EVENT_READ
 
+selector = DefaultSelector()
+
 class connection:
     
     S_INIT = 0
@@ -10,11 +12,11 @@ class connection:
     S_LOCAL_WRITE = 4
 
     def __init__(self, local_sock):
-        self.state = S_INIT
+        self.state = self.S_INIT
         self.local_sock = local_sock
         self.remote_sock = None
 
-        selector.register(sock, EVENT_READ, on_local_read)
+        selector.register(local_sock, EVENT_READ, on_local_read)
 
     def update_state(self, new_state):
         if new_state == self.S_ESTABLISHED:
@@ -47,7 +49,7 @@ def on_accept(listen_socket):
 
 listen_socket = None   #正在监听的套接字
 
-def main():
+def main(address):
     sock = socket()
     sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
     sock.bind(address)
@@ -69,4 +71,4 @@ def main():
         sock.close()
 
 if __name__ == "__main__":
-    main()
+    main(("127.0.0.1", 9999))
