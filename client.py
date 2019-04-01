@@ -13,10 +13,10 @@ def check_python():
     '''
     检查Python版本。
 
-    仅考虑支持Python3.4及以上版本。
+    仅支持Python3.4及以上版本。
     '''
-    if sys.version_info < (3, 5):
-        print('Sorry, Python 3.4 above required.')
+    if sys.version_info < (3, 4):
+        print('抱歉，仅支持Python 3.4 及以上版本.')
         exit(1)
 
 
