@@ -26,6 +26,39 @@ DECRYPT = 0
 cached_keys = {}
 
 
+class aes_256_cfb_Cyptor:
+
+    KEYLEN = 32
+    IVLEN = 16
+    ENCRYPT = 1
+    DECRYPT = 0
+
+    def __init__(self, passwd):
+        self.ciphered = False
+        self.passwd = passwd
+        self.iv = None
+
+    def cipher(self, data):
+        if not self.ciphered:
+            iv = os.urandom(self.IVLEN)
+            key, _ = EVP_BytesToKey(self.passwd, self.KEYLEN, self.IVLEN)
+
+            cipher = M2Crypto.EVP.Cipher('aes_256_cfb', key, iv, self.ENCRYPT)
+            encrypted = cipher.update(data) + cipher.final()
+
+            self.key = key
+            self.iv = iv
+            self.ciphered = True
+
+            return iv + encrypted
+        else:
+            return cipher.update(data) + cipher.final()
+
+    def decipher(self, data):
+        cipher = M2Crypto.EVP.Cipher('aes_256_cfb', self.key, self.iv, self.DECRYPT)
+        text = cipher.update(data) + cipher.final()
+        return text
+
 def EVP_BytesToKey(password, key_len, iv_len):
     '''
     使用OpenSSL中的同名函数，通过不定长的密码生成定长的密钥和初始向量。

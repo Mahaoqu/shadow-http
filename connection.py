@@ -1,10 +1,40 @@
-from socket import socket, AF_INET, SOCK_STREAM, SOL_SOCKET, SO_REUSEADDR
-from selectors import DefaultSelector, EVENT_READ, EVENT_WRITE
+import logging
+import struct
+from selectors import EVENT_READ, EVENT_WRITE, DefaultSelector
+from socket import (AF_INET, AF_INET6, SO_REUSEADDR, SOCK_STREAM, SOL_SOCKET,
+                    inet_pton, socket)
+
+from common import is_total_http, parse_http, is_ip, is_total_http, to_bytes, to_str
+from encypt import aes_256_cfb_Cyptor
 
 selector = DefaultSelector()
 
 
-class connection:
+def make_shadow_head(addr):
+    head = b''
+    host = addr.remote_addr[0]
+    port = addr.remote_addr[1]
+    family = is_ip(host)
+
+    # hostname
+    if family == False:
+        head += b'\x03'
+        head += len(host).to_bytes(1, 'big')
+        head += to_bytes(host)
+
+    elif family == AF_INET:
+        head += b'\x01'
+        head += to_bytes(inet_pton(family, host))
+
+    else:
+        head += b'\x04'
+        head += to_bytes(inet_pton(family, host))
+
+    head += port.to_bytes(2, 'big')
+    return head
+
+
+class Connection:
     '''
     表示隧道客户端的一个双向套接字连接。
     '''
@@ -28,7 +58,7 @@ class connection:
     # 等待远程套接字的读，本地套接字的写
     S_LOCAL_WRITE = 4
 
-    def __init__(self, local_sock, local_addr):
+    def __init__(self, local_sock, local_addr, passwd, server_addr):
         '''
         初始化连接的状态。
 
@@ -38,9 +68,15 @@ class connection:
         self.local_sock = local_sock
         self.local_addr = local_addr
         self.remote_sock = None
+        self.remote_addr = None
 
-        self.upstream_buffer = []   # 从本地读，向远程写
-        self.downstream_buffer = []  # 从远程读，向本地写
+        self.passwd = passwd
+        self.server_addr = server_addr
+
+        self.cryptor = aes_256_cfb_Cyptor(passwd)
+
+        self.upstream_buffer = b''   # 从本地读，向远程写
+        self.downstream_buffer = b''  # 从远程读，向本地写
 
         self.update_state(self.S_INIT)
         self.count = 0
@@ -52,19 +88,74 @@ class connection:
         对每一个状态，为套接字注册相应的回调函数。
         '''
         def init_on_local_read(key, mask):
-            pass
+            data = self.local_sock.recv(1024)
+
+            # 如果本地套接字提前终止，就销毁这个连接
+            if not data:
+                self.destory()
+                return
+
+            # 将已读到的内容加入缓冲区
+            self.upstream_buffer += data
+
+            # 如果读到完整的HTTP请求，就解析它，获得远程地址和端口。尝试连接远程套接字，并转换到等待远程连接状态。
+            if is_total_http(self.upstream_buffer):
+                try:
+                    self.remote_addr = parse_http(
+                        self.upstream_buffer)  # (ip_addr, port)
+
+                    self.remote_sock = socket()
+                    self.remote_sock.setblocking(False)
+                    try:
+                        self.remote_sock.connect(
+                            ("127.0.0.1", 8898))  # 这里是从终端输入的地址
+                    except BlockingIOError:
+                        logging.debug("尝试非阻塞连接远程地址")
+
+                    self.upstream_buffer = b''
+                    self.update_state(self.S_REMOTE_CONNECT)
+
+                # 如果解析失败就销毁这个连接
+                except (OSError) as e:
+                    print(e)
+                    self.destory()
+
+            print(data)
 
         def rconn_on_local_read(key, mask):
-            pass
+            '''
+            本地可读，说明本地出现了错误，此时销毁这个连接。
+            '''
+            _ = self.local_sock.recv(1024)
+            logging.debug("本地连接{0}:{1}提前断开连接".format(
+                self.local_addr[0], self.local_addr[1]))
+
+            self.destory()
 
         def rconn_on_remote_write(key, mask):
-            pass
+            '''
+            远程套接字变为可写，说明连接已经建立
+            '''
+            if mask == EVENT_READ | EVENT_WRITE:
+                self.destory()
+                return
+
+            self.local_sock.send(b'HTTP/1.1 200 Connection Established\n\r')
+
+            self.remote_sock.send(make_shadow_head(self.remote_addr))
+            self.update_state(self.S_ESTABLISHED)
 
         def establised_on_local_read(key, mask):
-            pass
+            data = self.local_sock.recv(1024)
+            if not data:
+                self.destory()
+            self.remote_sock.send(self.cryptor.cipher(data))
 
         def establised_on_remote_read(key, mask):
-            pass
+            data = self.remote_sock.recv(1024)
+            if not data:
+                self.destory()
+            self.local_sock.send(self.cryptor.decipher(data))
 
         def lwrite_on_local_write(key, mask):
             pass
@@ -106,13 +197,15 @@ class connection:
             selector.modify(self.local_sock, EVENT_WRITE,
                             lwrite_on_local_write)
 
+        self.state == new_state
+
     def destory(self):
         '''
         销毁连接。
 
         分别销毁对应的套接字。并在事件循环中删除。
         '''
-        print(f'destoryed socket {id(self)}')
+
         if self.local_sock:
             selector.unregister(self.local_sock)
             self.local_sock.close()
@@ -132,7 +225,7 @@ def on_accept(key, mask):
     建立一个新连接对象，并在连接表中注册。
     '''
     new_socket, addr = key.fileobj.accept()
-    conns.append(connection(new_socket, addr))
+    conns.append(Connection(new_socket, addr, '123', '1231'))
 
 
 def main(address):
