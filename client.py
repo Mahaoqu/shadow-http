@@ -1,13 +1,11 @@
 import argparse
 import logging
 import os
-import pprint
 import socket
 import struct
 import sys
 
-import encypt
-
+import connection
 
 def check_python():
     '''
@@ -66,7 +64,7 @@ def to_str(s):
 def main():
     check_python()
     args = get_config()
-
+    # connection.main(args)
     ###########
 
 

@@ -34,12 +34,13 @@ class aes_256_cfb_Cyptor:
     DECRYPT = 0
 
     def __init__(self, passwd):
-        self.ciphered = False
+        self.ciptor = None
+        self.deciptor = None
         self.passwd = passwd
         self.iv = None
 
     def cipher(self, data):
-        if not self.ciphered:
+        if not self.ciptor:
             iv = os.urandom(self.IVLEN)
             key, _ = EVP_BytesToKey(self.passwd, self.KEYLEN, self.IVLEN)
 
@@ -48,15 +49,16 @@ class aes_256_cfb_Cyptor:
 
             self.key = key
             self.iv = iv
-            self.ciphered = True
+            self.ciptor = cipher  
 
             return iv + encrypted
         else:
-            return cipher.update(data) + cipher.final()
+            return self.ciptor.update(data) + self.ciptor.final()
 
     def decipher(self, data):
-        cipher = M2Crypto.EVP.Cipher('aes_256_cfb', self.key, self.iv, self.DECRYPT)
-        text = cipher.update(data) + cipher.final()
+        if not self.deciptor:
+            deciptor = M2Crypto.EVP.Cipher('aes_256_cfb', self.key, self.iv, self.DECRYPT)
+        text = deciptor.update(data) + deciptor.final()
         return text
 
 def EVP_BytesToKey(password, key_len, iv_len):

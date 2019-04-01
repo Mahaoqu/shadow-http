@@ -1,37 +1,13 @@
 import logging
 import struct
 from selectors import EVENT_READ, EVENT_WRITE, DefaultSelector
-from socket import (AF_INET, AF_INET6, SO_REUSEADDR, SOCK_STREAM, SOL_SOCKET,
+from socket import (AF_INET, AF_INET6, SO_REUSEADDR, SOCK_STREAM, SOL_SOCKET, SOL_TCP, TCP_NODELAY,
                     inet_pton, socket)
 
-from common import is_total_http, parse_http, is_ip, is_total_http, to_bytes, to_str
+from common import is_total_http, parse_http, is_ip, is_total_http, to_bytes, to_str, make_shadow_head
 from encypt import aes_256_cfb_Cyptor
 
 selector = DefaultSelector()
-
-
-def make_shadow_head(addr):
-    head = b''
-    host = addr.remote_addr[0]
-    port = addr.remote_addr[1]
-    family = is_ip(host)
-
-    # hostname
-    if family == False:
-        head += b'\x03'
-        head += len(host).to_bytes(1, 'big')
-        head += to_bytes(host)
-
-    elif family == AF_INET:
-        head += b'\x01'
-        head += to_bytes(inet_pton(family, host))
-
-    else:
-        head += b'\x04'
-        head += to_bytes(inet_pton(family, host))
-
-    head += port.to_bytes(2, 'big')
-    return head
 
 
 class Connection:
@@ -73,7 +49,7 @@ class Connection:
         self.passwd = passwd
         self.server_addr = server_addr
 
-        self.cryptor = aes_256_cfb_Cyptor(passwd)
+        self.cryptor = aes_256_cfb_Cyptor(to_bytes(passwd))
 
         self.upstream_buffer = b''   # 从本地读，向远程写
         self.downstream_buffer = b''  # 从远程读，向本地写
@@ -106,9 +82,10 @@ class Connection:
 
                     self.remote_sock = socket()
                     self.remote_sock.setblocking(False)
+                    self.remote_sock.setsockopt(SOL_TCP, TCP_NODELAY, 1)
                     try:
                         self.remote_sock.connect(
-                            ("127.0.0.1", 8898))  # 这里是从终端输入的地址
+                            self.server_addr)  # 这里是从终端输入的地址
                     except BlockingIOError:
                         logging.debug("尝试非阻塞连接远程地址")
 
@@ -136,19 +113,25 @@ class Connection:
             '''
             远程套接字变为可写，说明连接已经建立
             '''
-            if mask == EVENT_READ | EVENT_WRITE:
-                self.destory()
-                return
+            # if mask == EVENT_READ | EVENT_WRITE:
+            #     self.destory()
+            #     return
 
             self.local_sock.send(b'HTTP/1.1 200 Connection Established\n\r')
 
-            self.remote_sock.send(make_shadow_head(self.remote_addr))
+            # shadow_head = make_shadow_head(self.remote_addr)
+            # print(self.remote_sock)
+            # self.remote_sock.send(b'?????What the fuck')
             self.update_state(self.S_ESTABLISHED)
 
         def establised_on_local_read(key, mask):
             data = self.local_sock.recv(1024)
+            print(data)
+
             if not data:
                 self.destory()
+                return
+
             self.remote_sock.send(self.cryptor.cipher(data))
 
         def establised_on_remote_read(key, mask):
@@ -177,7 +160,7 @@ class Connection:
 
         elif new_state == self.S_REMOTE_CONNECT:
             selector.modify(self.local_sock, EVENT_READ, rconn_on_local_read)
-            selector.register(self.remote_sock, EVENT_READ |
+            selector.register(self.remote_sock, 
                               EVENT_WRITE, rconn_on_remote_write)
 
         elif new_state == self.S_ESTABLISHED:
@@ -197,7 +180,7 @@ class Connection:
             selector.modify(self.local_sock, EVENT_WRITE,
                             lwrite_on_local_write)
 
-        self.state == new_state
+        self.state = new_state
 
     def destory(self):
         '''
@@ -218,22 +201,31 @@ class Connection:
 conns = []
 
 
-def on_accept(key, mask):
-    '''
-    有新连接到来时调用的函数。
+def on_new_conn(args):
 
-    建立一个新连接对象，并在连接表中注册。
-    '''
-    new_socket, addr = key.fileobj.accept()
-    conns.append(Connection(new_socket, addr, '123', '1231'))
+    server_addr = args.host, args.port
+    passwd = args.password
+
+    def on_accept(key, mask):
+        '''
+        有新连接到来时调用的函数。
+
+        建立一个新连接对象，并在连接表中注册。
+        '''
+
+        new_socket, addr = key.fileobj.accept()
+        conns.append(Connection(new_socket, addr, passwd, server_addr))
+
+    return on_accept
 
 
-def main(address):
+def main(args):
     sock = socket()
     sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
-    sock.bind(address)
+    sock.bind(('', args.local))
     sock.listen(5)
 
+    on_accept = on_new_conn(args)  # 设定当连接
     selector.register(sock, EVENT_READ, on_accept)
     try:
         while True:
@@ -243,8 +235,16 @@ def main(address):
                 callback(key, mask)
 
     except KeyboardInterrupt:
+        for conn in conns:
+            print('conn in state {0}'.format(conn.state))
         sock.close()
 
 
 if __name__ == "__main__":
-    main(("127.0.0.1", 9999))
+    class Data:
+        def __init__(self):
+            self.local = 7301
+            self.host = '127.0.0.1'
+            self.port = 8888
+            self.password = '1234567'
+    main(Data())

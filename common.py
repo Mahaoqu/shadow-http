@@ -33,4 +33,28 @@ def is_total_http(buffer):
 
 
 def parse_http(connection):
-    return (None, None)
+    return ('172.217.160.78', 443)
+
+def make_shadow_head(addr):
+    print(addr)
+    head = b''
+    host = addr[0]
+    port = addr[1]
+    family = is_ip(host)
+
+    # hostname
+    if family == False:
+        head += b'\x03'
+        head += len(host).to_bytes(1, 'big')
+        head += to_bytes(host)
+
+    elif family == AF_INET:
+        head += b'\x01'
+        head += to_bytes(inet_pton(family, host))
+
+    else:
+        head += b'\x04'
+        head += to_bytes(inet_pton(family, host))
+
+    head += port.to_bytes(2, 'big')
+    return head
