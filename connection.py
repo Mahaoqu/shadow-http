@@ -9,11 +9,11 @@ class connection:
     表示隧道客户端的一个双向套接字连接。
     '''
     # 初始状态
-    # 等待本地套接字的写
+    # 等待本地套接字的读
     S_INIT = 0
 
     # 等待远程连接状态
-    # 等待远程套接字的读、本地套接字的写
+    # 等待远程套接字的写，本地套接字的读
     S_REMOTE_CONNECT = 1
 
     # 连接已经建立状态
@@ -21,11 +21,11 @@ class connection:
     S_ESTABLISHED = 2
 
     # 向远程写状态
-    # 等待远程套接字的写
+    # 等待远程套接字的写，本地套接字的读
     S_REMOTE_WRITE = 3
 
     # 向本地写状态
-    # 等待本地套接字的写
+    # 等待远程套接字的读，本地套接字的写
     S_LOCAL_WRITE = 4
 
     def __init__(self, local_sock):
@@ -67,6 +67,12 @@ class connection:
         def lwrite_on_local_write(key, mask):
             pass
 
+        def lwrite_on_remote_read(key, mask):
+            pass
+
+        def rwrite_on_local_read(key, mask):
+            pass
+
         def rwrite_on_remote_write(key, mask):
             pass
 
@@ -85,11 +91,11 @@ class connection:
             selector.modify(self.remote_sock, EVENT_READ, establised_on_remote_read)
 
         elif new_state == self.S_REMOTE_WRITE:
-            selector.unregister(self.local_sock)
+            selector.modify(self.local_sock, EVENT_READ, rwrite_on_local_read)
             selector.modify(self.remote_sock, EVENT_WRITE, rwrite_on_remote_write)
         
         elif new_state == self.S_LOCAL_WRITE:
-            selector.unregister(self.remote_sock)
+            selector.modify(self.remote_sock, EVENT_READ, lwrite_on_remote_read)
             selector.modify(self.local_sock, EVENT_WRITE, lwrite_on_local_write)
 
     def destory(self):
@@ -106,19 +112,16 @@ class connection:
             selector.unregister(self.remote_sock)
             self.remote_sock.close()
 
-
-# 套接字和连接的映射
-socketmap = {}
+conns = []
 
 def on_accept(key, mask):
     '''
     有新连接到来时调用的函数。
 
-    建立一个新连接对象，并在连接映射表中设置映射。
+    建立一个新连接对象，并在连接表中注册。
     '''
     new_socket = key.fileobj.accept()
-    new_conn = connection(new_socket)
-    socketmap[new_socket] = new_conn
+    conns.append(connection(new_socket))
 
 
 def main(address):
@@ -136,6 +139,8 @@ def main(address):
                 callback(key, mask)
 
     except KeyboardInterrupt:
+        for conn in conns:
+            conn.destory()
         sock.close()
 
 
