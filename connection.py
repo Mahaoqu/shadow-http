@@ -28,7 +28,7 @@ class connection:
     # 等待远程套接字的读，本地套接字的写
     S_LOCAL_WRITE = 4
 
-    def __init__(self, local_sock):
+    def __init__(self, local_sock, local_addr):
         '''
         初始化连接的状态。
 
@@ -36,12 +36,14 @@ class connection:
         '''
         self.state = None
         self.local_sock = local_sock
+        self.local_addr = local_addr
         self.remote_sock = None
-        
-        self.upstream_buffer = [] #本地读，远程写
-        self.downstream_buffer = [] #本地写，远程读
+
+        self.upstream_buffer = []   # 从本地读，向远程写
+        self.downstream_buffer = []  # 从远程读，向本地写
 
         self.update_state(self.S_INIT)
+        self.count = 0
 
     def update_state(self, new_state):
         '''
@@ -84,19 +86,25 @@ class connection:
 
         elif new_state == self.S_REMOTE_CONNECT:
             selector.modify(self.local_sock, EVENT_READ, rconn_on_local_read)
-            selector.register(self.remote_sock, EVENT_READ | EVENT_WRITE, rconn_on_remote_write)
+            selector.register(self.remote_sock, EVENT_READ |
+                              EVENT_WRITE, rconn_on_remote_write)
 
         elif new_state == self.S_ESTABLISHED:
-            selector.modify(self.local_sock, EVENT_READ, establised_on_local_read)
-            selector.modify(self.remote_sock, EVENT_READ, establised_on_remote_read)
+            selector.modify(self.local_sock, EVENT_READ,
+                            establised_on_local_read)
+            selector.modify(self.remote_sock, EVENT_READ,
+                            establised_on_remote_read)
 
         elif new_state == self.S_REMOTE_WRITE:
             selector.modify(self.local_sock, EVENT_READ, rwrite_on_local_read)
-            selector.modify(self.remote_sock, EVENT_WRITE, rwrite_on_remote_write)
-        
+            selector.modify(self.remote_sock, EVENT_WRITE,
+                            rwrite_on_remote_write)
+
         elif new_state == self.S_LOCAL_WRITE:
-            selector.modify(self.remote_sock, EVENT_READ, lwrite_on_remote_read)
-            selector.modify(self.local_sock, EVENT_WRITE, lwrite_on_local_write)
+            selector.modify(self.remote_sock, EVENT_READ,
+                            lwrite_on_remote_read)
+            selector.modify(self.local_sock, EVENT_WRITE,
+                            lwrite_on_local_write)
 
     def destory(self):
         '''
@@ -104,15 +112,18 @@ class connection:
 
         分别销毁对应的套接字。并在事件循环中删除。
         '''
+        print(f'destoryed socket {id(self)}')
         if self.local_sock:
             selector.unregister(self.local_sock)
             self.local_sock.close()
-            
+
         if self.remote_sock:
             selector.unregister(self.remote_sock)
             self.remote_sock.close()
 
+
 conns = []
+
 
 def on_accept(key, mask):
     '''
@@ -120,8 +131,8 @@ def on_accept(key, mask):
 
     建立一个新连接对象，并在连接表中注册。
     '''
-    new_socket = key.fileobj.accept()
-    conns.append(connection(new_socket))
+    new_socket, addr = key.fileobj.accept()
+    conns.append(connection(new_socket, addr))
 
 
 def main(address):
@@ -139,8 +150,6 @@ def main(address):
                 callback(key, mask)
 
     except KeyboardInterrupt:
-        for conn in conns:
-            conn.destory()
         sock.close()
 
 
