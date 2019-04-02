@@ -1,5 +1,6 @@
 from socket import AF_INET, AF_INET6, inet_pton
 
+
 def to_bytes(s):
     if bytes != str:
         if type(s) == str:
@@ -25,15 +26,27 @@ def is_ip(address):
             pass
     return False
 
-def is_total_http(buffer):
-    return b'CONNECT www.google.com:443 HTTP/1.1\n' in buffer
+
+class BadSocksHeader(Exception):
+    pass
 
 
-def parse_http(connection):
-    return ('172.217.160.78', 443)
+class NoAcceptableMethods(Exception):
+    pass
+
+
+def parse_http(buffer):
+    http_head = buffer.split(b'\n')[0].split(b' ')
+    if http_head[0] != b'CONNECT':
+        raise NoAcceptableMethods
+    try:
+        x = http_head[1].split(b':')
+        return (x[0], int(x[1]))
+    except:
+        raise BadSocksHeader
+
 
 def make_shadow_head(addr):
-    print(addr)
     head = b''
     host = addr[0]
     port = addr[1]
