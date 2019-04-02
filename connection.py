@@ -42,6 +42,8 @@ class Connection:
         S_LOCAL_WRITE: "S_LOCAL_WRITE"
     }
 
+    BUF_SIZE = 4096
+
     count = 0
 
     def __init__(self, local_sock, local_addr, passwd, remote_addr):
@@ -67,8 +69,8 @@ class Connection:
 
         self.local_closed = False
         self.remote_closed = False
-        self.id = self.count
-        self.count = self.count + 1
+        self.id = Connection.count
+        Connection.count = Connection.count + 1
 
         self.update_state(self.S_INIT)
 
@@ -97,8 +99,8 @@ class Connection:
                 try:
                     self.dst_addr = parse_http(
                         self.upstream_buffer)  # (ip_addr, port)
-                    logging.debug("[{0}]本地请求连接到{1}:{2}".format(
-                        self.id, self.dst_addr[0], self.dst_addr[1]))
+                    logging.info("[{0}]本地请求连接到 {1}:{2}".format(
+                        self.id, self.dst_addr[0].decode('utf-8'), self.dst_addr[1]))
                     self.remote_sock = socket()
                     self.remote_sock.setblocking(False)
                     self.remote_sock.setsockopt(SOL_TCP, TCP_NODELAY, 1)
@@ -106,14 +108,14 @@ class Connection:
                         self.remote_sock.connect(
                             self.remote_addr)  # 这里是从终端输入的地址
                     except BlockingIOError:
-                        logging.debug("[{0}]尝试非阻塞连接远程地址".format(self.id))
+                        logging.debug("[{0}]尝试非阻塞连接服务器".format(self.id))
 
                     self.upstream_buffer = b''
                     self.update_state(self.S_REMOTE_CONNECT)
 
                 # 如果解析失败就销毁这个连接
                 except OSError:
-                    logging.info("[{0}]解析本地连接HTTP隧道头失败".format(self.id))
+                    logging.error("[{0}]解析本地连接HTTP隧道头失败".format(self.id))
                     self.destory()
 
         def rconn_on_local_read(key, mask):
@@ -130,7 +132,14 @@ class Connection:
             '''
             远程套接字变为可写，说明连接已经建立
             '''
-            if mask == EVENT_READ | EVENT_WRITE:
+            shadow_head = make_shadow_head(self.dst_addr)
+            c_head = self.cryptor.cipher(shadow_head)
+
+            try:
+                self.remote_sock.send(c_head)
+
+            # 连接失败，此时发送会失败
+            except BrokenPipeError:
                 logging.debug("[{0}]远程连接{1}:{2}失败".format(
                     self.id, self.remote_addr[0], self.remote_addr[1]))
                 self.destory()
@@ -138,19 +147,19 @@ class Connection:
 
             logging.info("[{0}]远程地址{1}:{2}连接成功...".format(
                 self.id, self.remote_addr[0], self.remote_addr[1]))
+
             self.local_sock.send(
                 b'HTTP/1.1 200 Connection Established\r\n\r\n')
 
-            shadow_head = make_shadow_head(self.dst_addr)
-            chead = self.cryptor.cipher(shadow_head)
-            self.remote_sock.send(chead)
-
-            logging.info("[{0}]向远程服务器发送{1}:{2} {3}字节数据".format(
-                self.id, self.remote_addr[0], self.remote_addr[1], len(chead)))
+            logging.debug("[{0}]向远程服务器发送{1}:{2} {3}字节Shadow头".format(
+                self.id, self.remote_addr[0], self.remote_addr[1], len(c_head)))
             self.update_state(self.S_ESTABLISHED)
 
         def establised_on_local_read(key, mask):
-            data = self.local_sock.recv(1024)
+            data = self._recv_from_sock(self.local_sock)
+
+            if data is None:
+                return
 
             if not data:
                 logging.info("[{0}]本地关闭连接".format(self.id))
@@ -163,17 +172,18 @@ class Connection:
                 self.local_closed = True
                 return
 
-            logging.info("[{0}]从本地服务器{1}:{2}收到{3}字节数据".format(
-                self.id, self.local_addr[0], self.local_addr[1], len(data)))
-
             ciphered = self.cryptor.cipher(data)
             self.remote_sock.send(ciphered)
-            logging.info("[{0}]向远程服务器{1}:{2}发送{3}字节数据".format(
+            logging.debug("[{0}]向远程服务器{1}:{2}发送{3}字节数据".format(
                 self.id, self.remote_addr[0], self.remote_addr[1], len(ciphered)))
 
         def establised_on_remote_read(key, mask):
-            data = self.remote_sock.recv(1024)
-            
+            data = self._recv_from_sock(self.remote_sock)
+
+            # 出现异常，已经被销毁
+            if data is None:
+                return
+
             if not data:
                 logging.info("[{0}]远程服务器关闭连接".format(self.id))
                 if self.local_closed == True:
@@ -185,13 +195,10 @@ class Connection:
                 self.remote_closed = True
                 return
 
-            logging.info("[{0}]从远程服务器{1}:{2}收到{3}字节数据".format(
-                self.id, self.remote_addr[0], self.remote_addr[1], len(data)))
-
             deciphered = self.cryptor.decipher(data)
-            self.local_sock.send(deciphered)
-            logging.info("[{0}]向本地服务器{1}:{2}发送{3}字节数据".format(
-                self.id, self.local_addr[0], self.local_addr[1], len(deciphered)))
+            x = self.local_sock.send(deciphered)
+            logging.debug("[{0}]向本地服务器{1}:{2}发送{3}字节数据".format(
+                self.id, self.local_addr[0], self.local_addr[1], x))
 
         def lwrite_on_local_write(key, mask):
             pass
@@ -237,13 +244,36 @@ class Connection:
         logging.debug("[{0}]切换到状态{1}".format(
             self.id, self.statemap[self.state]))
 
+    def _recv_from_sock(self, sock):
+        if sock == self.local_sock:
+            addr = self.local_addr
+        else:
+            addr = self.remote_addr
+
+        try:
+            data = sock.recv(4086)
+
+        # 接受时被对方重置连接
+        except ConnectionResetError:
+            logging.error("[{0}]连接已经被 {1}:{2} 重置".format(
+                self.id, addr[0], addr[1]))
+            self.destory()
+            return
+
+        else:
+            # 读到EOF时不写日志
+            if data:
+                logging.debug("[{0}]从 {1}:{2} 收到{3}字节数据".format(
+                    self.id, addr[0], addr[1], len(data)))
+            return data
+
     def destory(self):
         '''
         销毁连接。
 
         分别销毁对应的套接字。并在事件循环中删除。
         '''
-        logging.debug("[{0}]销毁连接".format(self.id))
+        logging.info("[{0}]连接已被销毁".format(self.id))
 
         # 由于之前可能会提前解除注册.. 这里捕获这个异常。
         # TODO: 重构关闭和解除注册的逻辑
@@ -262,9 +292,6 @@ class Connection:
             self.remote_sock.close()
 
 
-conns = []
-
-
 def on_new_conn(args):
 
     server_addr = args.host, args.port
@@ -277,7 +304,7 @@ def on_new_conn(args):
         建立一个新连接对象，并在连接表中注册。
         '''
         new_socket, addr = key.fileobj.accept()
-        conns.append(Connection(new_socket, addr, passwd, server_addr))
+        Connection(new_socket, addr, passwd, server_addr)
         logging.debug("建立新的连接请求，本地{0}:{1}".format(addr[0], addr[1]))
 
     return on_accept
@@ -299,8 +326,6 @@ def main(args):
                 callback(key, mask)
 
     except KeyboardInterrupt:
-        for conn in conns:
-            print('[{0}]连接在状态{1}'.format(conn.id, conn.state))
         sock.close()
 
 
