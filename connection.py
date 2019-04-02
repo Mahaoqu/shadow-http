@@ -113,15 +113,15 @@ class Connection:
             '''
             远程套接字变为可写，说明连接已经建立
             '''
-            # if mask == EVENT_READ | EVENT_WRITE:
-            #     self.destory()
-            #     return
+            if mask == EVENT_READ | EVENT_WRITE:
+                self.destory()
+                return
 
             self.local_sock.send(b'HTTP/1.1 200 Connection Established\n\r')
 
-            # shadow_head = make_shadow_head(self.remote_addr)
-            # print(self.remote_sock)
-            # self.remote_sock.send(b'?????What the fuck')
+            shadow_head = make_shadow_head(self.remote_addr)
+
+            self.remote_sock.send(self.cryptor.cipher(shadow_head))
             self.update_state(self.S_ESTABLISHED)
 
         def establised_on_local_read(key, mask):
@@ -138,6 +138,8 @@ class Connection:
             data = self.remote_sock.recv(1024)
             if not data:
                 self.destory()
+                return
+
             self.local_sock.send(self.cryptor.decipher(data))
 
         def lwrite_on_local_write(key, mask):
@@ -160,7 +162,7 @@ class Connection:
 
         elif new_state == self.S_REMOTE_CONNECT:
             selector.modify(self.local_sock, EVENT_READ, rconn_on_local_read)
-            selector.register(self.remote_sock, 
+            selector.register(self.remote_sock,
                               EVENT_WRITE, rconn_on_remote_write)
 
         elif new_state == self.S_ESTABLISHED:
@@ -229,7 +231,7 @@ def main(args):
     selector.register(sock, EVENT_READ, on_accept)
     try:
         while True:
-            events = selector.select()
+            events = selector.select()  # 程序会在这里阻塞等待事件发生
             for key, mask in events:
                 callback = key.data
                 callback(key, mask)

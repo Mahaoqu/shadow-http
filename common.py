@@ -25,9 +25,6 @@ def is_ip(address):
             pass
     return False
 
-'''HTTP协议的处理函数。只解析Connect方法'''
-
-
 def is_total_http(buffer):
     return b'CONNECT www.google.com:443 HTTP/1.1\n' in buffer
 

@@ -25,10 +25,15 @@ python client.py [-h] -i HOST -p PORT [-l LOCAL] -c PASSWORD [-m METHOD] [-v]
 
 要求运行环境Python 3.4以上版本。
 
-依赖于M2Crypto库，可以使用pip进行安装。
+依赖于PyCryptodome库，可以使用pip进行安装。
 ```
-pip install M2Crypto
+pip install pycryptodome
 ```
+Windows下可以尝试：
+```
+pip install pycryptodomex
+```
+详见：https://pycryptodome.readthedocs.io/
 
 ## 协议
 

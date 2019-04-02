@@ -49,23 +49,10 @@ def get_config():
     return args
 
 
-def to_bytes(s):
-    if type(s) == str:
-        return s.encode('utf-8')
-    return s
-
-
-def to_str(s):
-    if type(s) == bytes:
-        return s.decode('utf-8')
-    return s
-
-
 def main():
     check_python()
     args = get_config()
-    # connection.main(args)
-    ###########
+    connection.main(args)
 
 
 if __name__ == "__main__":
