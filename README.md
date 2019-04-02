@@ -1,4 +1,5 @@
 # shadow-http
+![GitHub](https://img.shields.io/github/license/mahaoqu/shadow-http.svg?style=flat-square)
 A Shadowsocks-like http proxy server.
 
 Shakdow-http是一个与Shadowsocks兼容的HTTP隧道程序，提供加密的端对端TCP隧道通信。
@@ -33,7 +34,27 @@ Windows下可以尝试：
 ```
 pip install pycryptodomex
 ```
-详见：https://pycryptodome.readthedocs.io/
+
+
+### 本地代理配置：
+
+在本地运行服务后，可以使用
+
+* Windows：
+
+  控制面板 - Internet选项 - “连接”属性卡 - 局域网设置 - “代理服务器”设置 - 高级
+
+  在“安全(Secure)”一栏中填写环回地址（127.0.0.1）和监听的本地端口。
+
+  ![windows-client](pics/windows-client.png)
+
+* Mac版本：
+
+  系统偏好设置… - 网络 - 高级… -“代理”选项卡 - 安全网页代理(HTTPS)
+
+  在安全网页代理服务器一栏中填写环回地址（127.0.0.1）和监听的本地端口。
+
+  ![mac-client](pics/mac-client.png)
 
 ## 协议
 
@@ -47,7 +68,6 @@ CONNECT www.google.com:443 HTTP/1.1
 Host: www.google.com:443
 Proxy-Connection: keep-alive
 User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_14_3) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/72.0.3626.121 Safari/537.36
-
 ```
 请求的起始行中表明了要连接的目标地址和端口号。
 
@@ -126,9 +146,10 @@ Shadowsocks协议是隧道客户端和隧道服务器之间采取的通信协议
 
 
 ## 参考资料：
-1. 《HTTP权威指南》8.5节
-2. [Shadowsocks 源码分析——协议与结构](https://loggerhead.me/posts/shadowsocks-yuan-ma-fen-xi-xie-yi-yu-jie-gou.html)
-3. [selectors — 高级 I/O 复用库 — Python 3.7.3 文档](https://docs.python.org/zh-cn/3/library/selectors.html)
+1. [PyCryptodome 3.8.0 documentation](https://pycryptodome.readthedocs.io/en/latest/)
+2. 《HTTP权威指南》8.5节
+3. [Shadowsocks 源码分析——协议与结构](https://loggerhead.me/posts/shadowsocks-yuan-ma-fen-xi-xie-yi-yu-jie-gou.html)
+4. [selectors — 高级 I/O 复用库 — Python 3.7.3 文档](https://docs.python.org/zh-cn/3/library/selectors.html)
 
 ## 注意事项：
 1. 为每一个函数写注释。
