@@ -5,7 +5,7 @@ import socket
 import struct
 import sys
 
-import client_connection
+import server_connection
 
 def check_python():
     '''
@@ -22,13 +22,9 @@ def get_config():
     '''
     返回命令行参数。
 
-    获得本地监听端口，远程主机地址、端口号和密码。加密模式目前只支持aes-256-cfb，可以选择开启Verbose模式。
+    获得本地监听端口、密码。加密模式目前只支持aes-256-cfb，可以选择开启Verbose模式。
     '''
-    parser = argparse.ArgumentParser(description='ShadowHTTP 客户端')
-    parser.add_argument("-i", "--host", required=True,
-                        help="Shadowhttp 服务器IP地址")
-    parser.add_argument("-p", "--port", required=True,
-                        type=int, help="Shadowhttp 服务器端口号")
+    parser = argparse.ArgumentParser(description='ShadowHTTP 服务器')
     parser.add_argument("-l", "--local", type=int, default=3107,
                         help="本地 HTTP 代理服务器监听端口, 默认使用 3107")
     parser.add_argument("-c", "--password", required=True,
