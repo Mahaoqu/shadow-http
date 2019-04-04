@@ -52,7 +52,7 @@ def get_config():
 def main():
     check_python()
     args = get_config()
-    connection.main(args)
+    client_connection.main(args)
 
 
 if __name__ == "__main__":

@@ -4,8 +4,10 @@ from selectors import EVENT_READ, EVENT_WRITE, DefaultSelector
 from socket import (AF_INET, AF_INET6, SO_REUSEADDR, SOCK_STREAM, SOL_SOCKET,
                     SOL_TCP, TCP_NODELAY, SHUT_WR, inet_pton, socket)
 
-from common import is_ip, make_shadow_head, parse_http, to_bytes, to_str
+from common import (is_ip, make_shadow_head, parse_shadow_head, parse_http,
+                    to_bytes, to_str)
 from encypt import aes_256_cfb_Cyptor
+from asyncdns import DNSResolver
 
 selector = DefaultSelector()
 
@@ -39,6 +41,9 @@ class Connection:
     BUF_SIZE = 4096
 
     count = 0
+
+    dns_resolver = DNSResolver()
+    dns_resolver.add_to_loop(selector)
 
     def __init__(self, local_sock, local_addr, passwd):
         '''
@@ -74,7 +79,7 @@ class Connection:
         '''
 
         def init_on_local_read(key, mask):
-            data = _recv_from_sock(self.local_sock)
+            data = self._recv_from_sock(self.local_sock)
 
             # 如果本地套接字提前终止，就销毁这个连接
             if not data:
@@ -83,34 +88,51 @@ class Connection:
                 self.destory()
                 return
 
-            # 解析Shadow头，得到远程地址
+            deciphered = self.cryptor.decipher(data)
+            # 解析Shadow头，得到远程地址(域名或IP地址)
             # 并将剩余部分加入缓冲区
             try:
-                self.remote_addr, head_length = parse_shadow_head(data)
-
+                host, port, head_length = parse_shadow_head(deciphered)
             except:
                 self.destory()
                 return
 
             self.upstream_buffer += data[head_length:]
+            # 设置本地端口号
+            self.remote_addr = None, port
 
-            # 假设返回的是IP地址...
-            # 尝试连接远程套接字，并转换到等待远程连接状态。
+            # 转移到等待解析地址状态
+            self.update_state(self.S_WAIT_DNS)
+
+            # 试图解析地址。如果已经是IP地址这里会立刻返回。
+            # 如果是域名，就等待事件回调。在此期间等待本地的读（回调rconn_on_local_read）
+            # DNS解析器将等待DNS套接字事件。
+            self.dns_resolver.resolve(host, on_dns_resolved)
+
+        def on_dns_resolved(result, error):
+            '''
+            DNS 解析完成时调用。
+            '''
+            hostname, ip = result
+            if ip == None:
+                logging.info("[{0}]域名{1}DNS解析失败".format(self.id, hostname))
+                self.destory()
+                return
+
+            # 解析成功，尝试连接并跳转状态。
+            self.remote_addr[0] = ip
             try:
-                self.remote_sock.connect(self.remote_addr)  # 这里是从终端输入的地址
+                self.remote_sock.connect(self.remote_addr)
             except BlockingIOError:
                 logging.debug("[{0}]尝试非阻塞连接远程服务器".format(self.id))
 
             self.update_state(self.S_REMOTE_CONNECT)
 
-        def wdns_on_local_read(key, mask):
-            pass
-
         def rconn_on_local_read(key, mask):
             '''
             本地可读，把读到的内容加入缓冲区的尾部
             '''
-            self.upstream_buffer += _recv_from_sock(self.local_sock)
+            self.upstream_buffer += self._recv_from_sock(self.local_sock)
 
         def rconn_on_remote_write(key, mask):
             '''
@@ -119,6 +141,10 @@ class Connection:
             logging.info("[{0}]远程地址{1}:{2}连接成功...".format(
                 self.id, self.remote_addr[0], self.remote_addr[1]))
 
+            kunkunkun = self.cryptor.decipher(self.upstream_buffer)  # 你被写在我的代码里
+            self.remote_sock.send(kunkunkun)
+
+            self.upstream_buffer = b''
             self.update_state(self.S_ESTABLISHED)
 
         def establised_on_local_read(key, mask):
@@ -174,7 +200,7 @@ class Connection:
             selector.register(self.local_sock, EVENT_READ, init_on_local_read)
 
         elif new_state == self.S_WAIT_DNS:
-            selector.modify(self.local_sock, EVENT_READ, wdns_on_local_read)
+            selector.modify(self.local_sock, EVENT_READ, rconn_on_local_read)
 
         elif new_state == self.S_REMOTE_CONNECT:
             selector.modify(self.local_sock, EVENT_READ, rconn_on_local_read)
@@ -241,7 +267,6 @@ class Connection:
 
 def on_new_conn(args):
 
-    server_addr = args.host, args.port
     passwd = args.password
 
     def on_accept(key, mask):
@@ -251,7 +276,7 @@ def on_new_conn(args):
         建立一个新连接对象，并在连接表中注册。
         '''
         new_socket, addr = key.fileobj.accept()
-        Connection(new_socket, addr, passwd, server_addr)
+        Connection(new_socket, addr, passwd)
         logging.debug("建立新的连接请求，本地{0}:{1}".format(addr[0], addr[1]))
 
     return on_accept

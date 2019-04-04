@@ -48,7 +48,7 @@ def get_config():
 def main():
     check_python()
     args = get_config()
-    connection.main(args)
+    server_connection.main(args)
 
 
 if __name__ == "__main__":

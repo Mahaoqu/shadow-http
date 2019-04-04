@@ -1,19 +1,10 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-#
-# Copyright 2014-2015 clowwindy
-#
-# Licensed under the Apache License, Version 2.0 (the "License"); you may
-# not use this file except in compliance with the License. You may obtain
-# a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
-# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
-# License for the specific language governing permissions and limitations
-# under the License.
+"""
+异步的DNS请求服务。使用selector框架。
+
+来自 shadowsocks/shadowsocks/asyncdns.py
+使用 Apache 协议。
+Copyright 2015 clowwindy
+"""
 
 from __future__ import absolute_import, division, print_function, \
     with_statement
@@ -23,8 +14,11 @@ import socket
 import struct
 import re
 import logging
-from functools import lru_cache
+import lru_cache
 
+from selectors import EVENT_READ
+
+from common import is_ip, to_bytes
 
 CACHE_SWEEP_INTERVAL = 30
 
@@ -78,7 +72,7 @@ def build_address(address):
         l = len(label)
         if l > 63:
             return None
-        results.append(common.chr(l))
+        results.append(to_bytes(chr(l)))
         results.append(label)
     results.append(b'\0')
     return b''.join(results)
@@ -106,7 +100,7 @@ def parse_ip(addrtype, data, length, offset):
 def parse_name(data, offset):
     p = offset
     labels = []
-    l = common.ord(data[p])
+    l = ord(data[p])
     while l > 0:
         if (l & (128 + 64)) == (128 + 64):
             # pointer
@@ -120,7 +114,7 @@ def parse_name(data, offset):
         else:
             labels.append(data[p + 1:p + 1 + l])
             p += 1 + l
-        l = common.ord(data[p])
+        l = to_bytes(ord(data[p]))
     return p - offset + 1, b'.'.join(labels)
 
 
@@ -151,15 +145,13 @@ def parse_record(data, offset, question=False):
     nlen, name = parse_name(data, offset)
     if not question:
         record_type, record_class, record_ttl, record_rdlength = struct.unpack(
-            '!HHiH', data[offset + nlen:offset + nlen + 10]
-        )
+            '!HHiH', data[offset + nlen:offset + nlen + 10])
         ip = parse_ip(record_type, data, record_rdlength, offset + nlen + 10)
         return nlen + 10 + record_rdlength, \
             (name, ip, record_type, record_class, record_ttl)
     else:
         record_type, record_class = struct.unpack(
-            '!HH', data[offset + nlen:offset + nlen + 4]
-        )
+            '!HH', data[offset + nlen:offset + nlen + 4])
         return nlen + 4, (name, None, record_type, record_class, None, None)
 
 
@@ -219,7 +211,7 @@ def parse_response(data):
                 response.answers.append((an[1], an[2], an[3]))
             return response
     except Exception as e:
-        shell.print_exception(e)
+        print(e)
         return None
 
 
@@ -246,9 +238,8 @@ STATUS_SECOND = 1
 
 
 class DNSResolver(object):
-
-    def __init__(self, server_list=None, prefer_ipv6=False):
-        self._loop = None
+    def __init__(self, server_list=None):
+        # self._loop = None
         self._hosts = {}
         self._hostname_status = {}
         self._hostname_to_cb = {}
@@ -260,13 +251,9 @@ class DNSResolver(object):
             self._parse_resolv()
         else:
             self._servers = server_list
-        if prefer_ipv6:
-            self._QTYPES = [QTYPE_AAAA, QTYPE_A]
-        else:
-            self._QTYPES = [QTYPE_A, QTYPE_AAAA]
+
+        self._QTYPES = [QTYPE_A, QTYPE_AAAA]
         self._parse_hosts()
-        # TODO monitor hosts change and reload hosts
-        # TODO parse /etc/gai.conf and follow its rules
 
     def _parse_resolv(self):
         self._servers = []
@@ -283,7 +270,7 @@ class DNSResolver(object):
                         continue
 
                     server = parts[1]
-                    if common.is_ip(server) == socket.AF_INET:
+                    if is_ip(server) == socket.AF_INET:
                         if type(server) != str:
                             server = server.decode('utf8')
                         self._servers.append(server)
@@ -305,7 +292,7 @@ class DNSResolver(object):
                         continue
 
                     ip = parts[0]
-                    if not common.is_ip(ip):
+                    if not is_ip(ip):
                         continue
 
                     for i in range(1, len(parts)):
@@ -315,16 +302,19 @@ class DNSResolver(object):
         except IOError:
             self._hosts['localhost'] = '127.0.0.1'
 
-    def add_to_loop(self, loop):
-        if self._loop:
-            raise Exception('already add to loop')
-        self._loop = loop
-        # TODO when dns server is IPv6
+    def add_to_loop(self, selector):
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM,
                                    socket.SOL_UDP)
         self._sock.setblocking(False)
-        loop.add(self._sock, eventloop.POLL_IN, self)
-        loop.add_periodic(self.handle_periodic)
+
+        def _dns_on_read(key, mask):
+            data, addr = self._sock.recvfrom(1024)
+            if addr[0] not in self._servers:
+                logging.warn('[DNS]收到非本地请求包')
+                return
+            self._handle_data(data)
+
+        selector.register(self._sock, EVENT_READ, _dns_on_read)
 
     def _call_callback(self, hostname, ip, error=None):
         callbacks = self._hostname_to_cb.get(hostname, [])
@@ -366,25 +356,6 @@ class DNSResolver(object):
                             self._call_callback(hostname, None)
                             break
 
-    def handle_event(self, sock, fd, event):
-        if sock != self._sock:
-            return
-        if event & eventloop.POLL_ERR:
-            logging.error('dns socket err')
-            self._loop.remove(self._sock)
-            self._sock.close()
-            # TODO when dns server is IPv6
-            self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM,
-                                       socket.SOL_UDP)
-            self._sock.setblocking(False)
-            self._loop.add(self._sock, eventloop.POLL_IN, self)
-        else:
-            data, addr = sock.recvfrom(1024)
-            if addr[0] not in self._servers:
-                logging.warn('received a packet other than our dns')
-                return
-            self._handle_data(data)
-
     def handle_periodic(self):
         self._cache.sweep()
 
@@ -403,8 +374,8 @@ class DNSResolver(object):
     def _send_req(self, hostname, qtype):
         req = build_request(hostname, qtype)
         for server in self._servers:
-            logging.debug('resolving %s with type %d using server %s',
-                          hostname, qtype, server)
+            logging.debug('[DNS] 解析域名 %s, 类型 %d, 服务器: %s', hostname, qtype,
+                          server)
             self._sock.sendto(req, (server, 53))
 
     def resolve(self, hostname, callback):
@@ -412,14 +383,14 @@ class DNSResolver(object):
             hostname = hostname.encode('utf8')
         if not hostname:
             callback(None, Exception('empty hostname'))
-        elif common.is_ip(hostname):
+        elif is_ip(hostname):
             callback((hostname, hostname), None)
         elif hostname in self._hosts:
-            logging.debug('hit hosts: %s', hostname)
+            logging.debug('[DNS]命中缓存: %s', hostname)
             ip = self._hosts[hostname]
             callback((hostname, ip), None)
         elif hostname in self._cache:
-            logging.debug('hit cache: %s', hostname)
+            logging.debug('[DNS]命中缓存: %s', hostname)
             ip = self._cache[hostname]
             callback((hostname, ip), None)
         else:
@@ -437,18 +408,17 @@ class DNSResolver(object):
                 # TODO send again only if waited too long
                 self._send_req(hostname, self._QTYPES[0])
 
-    def close(self):
-        if self._sock:
-            if self._loop:
-                self._loop.remove_periodic(self.handle_periodic)
-                self._loop.remove(self._sock)
-            self._sock.close()
-            self._sock = None
+    # def close(self):
+    #     if self._sock:
+    #         if self._loop:
+    #             self._loop.remove_periodic(self.handle_periodic)
+    #             self._loop.remove(self._sock)
+    #         self._sock.close()
+    #         self._sock = None
 
 
 def test():
     dns_resolver = DNSResolver()
-    loop = eventloop.EventLoop()
     dns_resolver.add_to_loop(loop)
 
     global counter
@@ -465,10 +435,11 @@ def test():
             if counter == 9:
                 dns_resolver.close()
                 loop.stop()
+
         a_callback = callback
         return a_callback
 
-    assert(make_callback() != make_callback())
+    assert (make_callback() != make_callback())
 
     dns_resolver.resolve(b'google.com', make_callback())
     dns_resolver.resolve('google.com', make_callback())
@@ -477,18 +448,20 @@ def test():
     dns_resolver.resolve('www.facebook.com', make_callback())
     dns_resolver.resolve('ns2.google.com', make_callback())
     dns_resolver.resolve('invalid.@!#$%^&$@.hostname', make_callback())
-    dns_resolver.resolve('toooooooooooooooooooooooooooooooooooooooooooooooooo'
-                         'ooooooooooooooooooooooooooooooooooooooooooooooooooo'
-                         'long.hostname', make_callback())
-    dns_resolver.resolve('toooooooooooooooooooooooooooooooooooooooooooooooooo'
-                         'ooooooooooooooooooooooooooooooooooooooooooooooooooo'
-                         'ooooooooooooooooooooooooooooooooooooooooooooooooooo'
-                         'ooooooooooooooooooooooooooooooooooooooooooooooooooo'
-                         'ooooooooooooooooooooooooooooooooooooooooooooooooooo'
-                         'ooooooooooooooooooooooooooooooooooooooooooooooooooo'
-                         'long.hostname', make_callback())
+    dns_resolver.resolve(
+        'toooooooooooooooooooooooooooooooooooooooooooooooooo'
+        'ooooooooooooooooooooooooooooooooooooooooooooooooooo'
+        'long.hostname', make_callback())
+    dns_resolver.resolve(
+        'toooooooooooooooooooooooooooooooooooooooooooooooooo'
+        'ooooooooooooooooooooooooooooooooooooooooooooooooooo'
+        'ooooooooooooooooooooooooooooooooooooooooooooooooooo'
+        'ooooooooooooooooooooooooooooooooooooooooooooooooooo'
+        'ooooooooooooooooooooooooooooooooooooooooooooooooooo'
+        'ooooooooooooooooooooooooooooooooooooooooooooooooooo'
+        'long.hostname', make_callback())
 
-    loop.run()           
+    loop.run()
 
 
 if __name__ == '__main__':
