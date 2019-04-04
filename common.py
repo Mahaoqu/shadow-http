@@ -1,6 +1,17 @@
 from socket import AF_INET, AF_INET6, inet_pton, inet_ntop
 import struct
 
+def compat_ord(s):
+    if type(s) == int:
+        return s
+    return ord(s)
+
+
+def compat_chr(d):
+    if bytes == str:
+        return chr(d)
+    return bytes([d])
+
 def to_bytes(s):
     if bytes != str:
         if type(s) == str:
@@ -27,7 +38,7 @@ def is_ip(address):
     return False
 
 
-class BadSocksHeader(Exception):
+class BadHttpHeader(Exception):
     pass
 
 
@@ -47,7 +58,7 @@ def parse_http(buffer):
         x = http_head[1].split(b':')
         return (x[0], int(x[1]))
     except:
-        raise BadSocksHeader
+        raise BadHttpHeader
 
 
 def make_shadow_head(addr):

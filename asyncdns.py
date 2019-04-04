@@ -18,7 +18,7 @@ import lru_cache
 
 from selectors import EVENT_READ
 
-from common import is_ip, to_bytes
+from common import is_ip, to_bytes, compat_ord, compat_chr
 
 CACHE_SWEEP_INTERVAL = 30
 
@@ -100,7 +100,7 @@ def parse_ip(addrtype, data, length, offset):
 def parse_name(data, offset):
     p = offset
     labels = []
-    l = ord(data[p])
+    l = compat_ord(data[p])
     while l > 0:
         if (l & (128 + 64)) == (128 + 64):
             # pointer
@@ -114,7 +114,7 @@ def parse_name(data, offset):
         else:
             labels.append(data[p + 1:p + 1 + l])
             p += 1 + l
-        l = to_bytes(ord(data[p]))
+        l = compat_ord(data[p])
     return p - offset + 1, b'.'.join(labels)
 
 
@@ -186,7 +186,7 @@ def parse_response(data):
             qds = []
             ans = []
             offset = 12
-            for i in range(0, res_qdcount):
+            for _ in range(0, res_qdcount):
                 l, r = parse_record(data, offset, True)
                 offset += l
                 if r:
@@ -211,7 +211,7 @@ def parse_response(data):
                 response.answers.append((an[1], an[2], an[3]))
             return response
     except Exception as e:
-        print(e)
+        logging.exception(e)
         return None
 
 
@@ -418,50 +418,7 @@ class DNSResolver(object):
 
 
 def test():
-    dns_resolver = DNSResolver()
-    dns_resolver.add_to_loop(loop)
-
-    global counter
-    counter = 0
-
-    def make_callback():
-        global counter
-
-        def callback(result, error):
-            global counter
-            # TODO: what can we assert?
-            print(result, error)
-            counter += 1
-            if counter == 9:
-                dns_resolver.close()
-                loop.stop()
-
-        a_callback = callback
-        return a_callback
-
-    assert (make_callback() != make_callback())
-
-    dns_resolver.resolve(b'google.com', make_callback())
-    dns_resolver.resolve('google.com', make_callback())
-    dns_resolver.resolve('example.com', make_callback())
-    dns_resolver.resolve('ipv6.google.com', make_callback())
-    dns_resolver.resolve('www.facebook.com', make_callback())
-    dns_resolver.resolve('ns2.google.com', make_callback())
-    dns_resolver.resolve('invalid.@!#$%^&$@.hostname', make_callback())
-    dns_resolver.resolve(
-        'toooooooooooooooooooooooooooooooooooooooooooooooooo'
-        'ooooooooooooooooooooooooooooooooooooooooooooooooooo'
-        'long.hostname', make_callback())
-    dns_resolver.resolve(
-        'toooooooooooooooooooooooooooooooooooooooooooooooooo'
-        'ooooooooooooooooooooooooooooooooooooooooooooooooooo'
-        'ooooooooooooooooooooooooooooooooooooooooooooooooooo'
-        'ooooooooooooooooooooooooooooooooooooooooooooooooooo'
-        'ooooooooooooooooooooooooooooooooooooooooooooooooooo'
-        'ooooooooooooooooooooooooooooooooooooooooooooooooooo'
-        'long.hostname', make_callback())
-
-    loop.run()
+    pass
 
 
 if __name__ == '__main__':

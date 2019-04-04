@@ -1,10 +1,11 @@
 import logging
 import struct
 from selectors import EVENT_READ, EVENT_WRITE, DefaultSelector
-from socket import (AF_INET, AF_INET6, SO_REUSEADDR, SOCK_STREAM, SOL_SOCKET,
-                    SOL_TCP, TCP_NODELAY, SHUT_WR, inet_pton, socket)
+from socket import (AF_INET, AF_INET6, SHUT_WR, SO_REUSEADDR, SOCK_STREAM,
+                    SOL_SOCKET, SOL_TCP, TCP_NODELAY, inet_pton, socket)
 
-from common import is_ip, make_shadow_head, parse_http, to_bytes, to_str
+from common import (BadHttpHeader, NoAcceptableMethods, is_ip,
+                    make_shadow_head, parse_http, to_bytes, to_str)
 from encypt import aes_256_cfb_Cyptor
 
 selector = DefaultSelector()
@@ -114,8 +115,12 @@ class Connection:
                     self.update_state(self.S_REMOTE_CONNECT)
 
                 # 如果解析失败就销毁这个连接
-                except OSError:
-                    logging.error("[{0}]解析本地连接HTTP隧道头失败".format(self.id))
+                except BadHttpHeader:
+                    logging.error("[{0}]解析本地连接隧道请求失败：非HTTP头部".format(self.id))
+                    self.destory()
+                except NoAcceptableMethods:
+                    logging.error(
+                        "[{0}]解析本地连接隧道头请求失败：不支持的HTTP请求方法".format(self.id))
                     self.destory()
 
         def rconn_on_local_read(key, mask):
@@ -254,7 +259,7 @@ class Connection:
             data = sock.recv(4086)
 
         # 接受时被对方重置连接
-        except ConnectionResetError:
+        except (ConnectionResetError, ConnectionAbortedError):
             logging.error("[{0}]连接已经被 {1}:{2} 重置".format(
                 self.id, addr[0], addr[1]))
             self.destory()

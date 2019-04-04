@@ -93,11 +93,13 @@ class Connection:
             # 并将剩余部分加入缓冲区
             try:
                 host, port, head_length = parse_shadow_head(deciphered)
+                logging.debug("[{0}]头部字段长{1}".format(
+                    self.id, head_length))
             except:
                 self.destory()
                 return
 
-            self.upstream_buffer += data[head_length:]
+            self.upstream_buffer += deciphered[head_length:]
             # 设置本地端口号
             self.remote_addr = None, port
 
@@ -120,7 +122,9 @@ class Connection:
                 return
 
             # 解析成功，尝试连接并跳转状态。
-            self.remote_addr[0] = ip
+            self.remote_addr = ip, self.remote_addr[1]
+
+            self.remote_sock = socket()
             try:
                 self.remote_sock.connect(self.remote_addr)
             except BlockingIOError:
@@ -141,8 +145,11 @@ class Connection:
             logging.info("[{0}]远程地址{1}:{2}连接成功...".format(
                 self.id, self.remote_addr[0], self.remote_addr[1]))
 
-            kunkunkun = self.cryptor.decipher(self.upstream_buffer)  # 你被写在我的代码里
-            self.remote_sock.send(kunkunkun)
+            deciphered = self.cryptor.decipher(self.upstream_buffer)
+            self.remote_sock.send(deciphered)
+            logging.debug("[{0}]向远程服务器{1}:{2}发送{3}字节数据".format(
+                self.id, self.remote_addr[0], self.remote_addr[1],
+                len(deciphered)))
 
             self.upstream_buffer = b''
             self.update_state(self.S_ESTABLISHED)
