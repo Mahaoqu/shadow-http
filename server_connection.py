@@ -59,7 +59,7 @@ class Connection:
 
         self.passwd = passwd
 
-        self.cryptor = aes_256_cfb_Cyptor(to_bytes(passwd))  #加密器
+        self.cryptor = aes_256_cfb_Cyptor(to_bytes(passwd))  # 加密器
 
         self.upstream_buffer = b''  # 从本地读，向远程写
         self.downstream_buffer = b''  # 从远程读，向本地写
@@ -146,10 +146,15 @@ class Connection:
                 self.id, self.remote_addr[0], self.remote_addr[1]))
 
             deciphered = self.cryptor.decipher(self.upstream_buffer)
-            self.remote_sock.send(deciphered)
-            logging.debug("[{0}]向远程服务器{1}:{2}发送{3}字节数据".format(
-                self.id, self.remote_addr[0], self.remote_addr[1],
-                len(deciphered)))
+            try:
+                self.remote_sock.send(deciphered)
+                logging.debug("[{0}]向远程服务器{1}:{2}发送{3}字节数据".format(
+                    self.id, self.remote_addr[0], self.remote_addr[1],
+                    len(deciphered)))
+            except ConnectionError:
+                logging.debug("[{0}]远程连接{1}:{2}失败".format(
+                    self.id, self.remote_addr[0], self.remote_addr[1]))
+                self.destory()
 
             self.upstream_buffer = b''
             self.update_state(self.S_ESTABLISHED)
@@ -234,7 +239,7 @@ class Connection:
             data = sock.recv(4086)
 
         # 接受时被对方重置连接
-        except ConnectionResetError:
+        except ConnectionError:
             logging.error("[{0}]连接已经被 {1}:{2} 重置".format(
                 self.id, addr[0], addr[1]))
             self.destory()
