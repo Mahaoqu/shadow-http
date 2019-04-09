@@ -27,20 +27,10 @@ class Connection:
     # 等待远程套接字可读，本地套接字可读
     S_ESTABLISHED = 2
 
-    # 向远程写状态
-    # 等待远程套接字可写，本地套接字可读
-    S_REMOTE_WRITE = 3
-
-    # 向本地写状态
-    # 等待远程套接字可读，本地套接字可写
-    S_LOCAL_WRITE = 4
-
     statemap = {
         S_INIT: "S_INIT",
         S_REMOTE_CONNECT: "S_REMOTE_CONNECT",
-        S_ESTABLISHED: "S_ESTABLISHED",
-        S_REMOTE_WRITE: "S_REMOTE_WRITE",
-        S_LOCAL_WRITE: "S_LOCAL_WRITE"
+        S_ESTABLISHED: "S_ESTABLISHED"
     }
 
     BUF_SIZE = 4096
@@ -138,6 +128,7 @@ class Connection:
             远程套接字变为可写，说明连接已经建立
             '''
             shadow_head = make_shadow_head(self.dst_addr)
+            #加密shadow协议头
             c_head = self.cryptor.cipher(shadow_head)
 
             try:
@@ -153,6 +144,7 @@ class Connection:
             logging.info("[{0}]远程地址{1}:{2}连接成功...".format(
                 self.id, self.remote_addr[0], self.remote_addr[1]))
 
+            #向本地套接字发送HTTP回复
             self.local_sock.send(
                 b'HTTP/1.1 200 Connection Established\r\n\r\n')
 
@@ -161,12 +153,15 @@ class Connection:
             self.update_state(self.S_ESTABLISHED)
 
         def establised_on_local_read(key, mask):
+            '''
+            本地可读，读入之后加密，写入远程套接字
+            '''
             data = self._recv_from_sock(self.local_sock)
 
             if data is None:
                 return
 
-            if not data:
+            if not data:   #b''
                 logging.info("[{0}]本地关闭连接".format(self.id))
                 if self.remote_closed == True:
                     self.destory()
@@ -183,6 +178,9 @@ class Connection:
                 self.id, self.remote_addr[0], self.remote_addr[1], len(ciphered)))
 
         def establised_on_remote_read(key, mask):
+            '''
+            远程可读，读入之后解密，写入本地套接字
+            '''
             data = self._recv_from_sock(self.remote_sock)
 
             # 出现异常，已经被销毁
@@ -205,25 +203,13 @@ class Connection:
             logging.debug("[{0}]向本地服务器{1}:{2}发送{3}字节数据".format(
                 self.id, self.local_addr[0], self.local_addr[1], x))
 
-        def lwrite_on_local_write(key, mask):
-            pass
-
-        def lwrite_on_remote_read(key, mask):
-            pass
-
-        def rwrite_on_local_read(key, mask):
-            pass
-
-        def rwrite_on_remote_write(key, mask):
-            pass
-
         if new_state == self.state:
             return
 
-        if new_state == self.S_INIT:
+        if new_state == self.S_INIT:  #注册新的事件
             selector.register(self.local_sock, EVENT_READ, init_on_local_read)
 
-        elif new_state == self.S_REMOTE_CONNECT:
+        elif new_state == self.S_REMOTE_CONNECT:#修改本地事件处理函数 注册远程事件处理函数
             selector.modify(self.local_sock, EVENT_READ, rconn_on_local_read)
             selector.register(self.remote_sock,
                               EVENT_WRITE, rconn_on_remote_write)
@@ -233,17 +219,6 @@ class Connection:
                             establised_on_local_read)
             selector.modify(self.remote_sock, EVENT_READ,
                             establised_on_remote_read)
-
-        elif new_state == self.S_REMOTE_WRITE:
-            selector.modify(self.local_sock, EVENT_READ, rwrite_on_local_read)
-            selector.modify(self.remote_sock, EVENT_WRITE,
-                            rwrite_on_remote_write)
-
-        elif new_state == self.S_LOCAL_WRITE:
-            selector.modify(self.remote_sock, EVENT_READ,
-                            lwrite_on_remote_read)
-            selector.modify(self.local_sock, EVENT_WRITE,
-                            lwrite_on_local_write)
 
         self.state = new_state
         logging.debug("[{0}]切换到状态{1}".format(
@@ -321,8 +296,8 @@ def main(args):
     sock.bind(('', args.local))
     sock.listen(5)
 
-    on_accept = on_new_conn(args)  # 设定当连接
-    selector.register(sock, EVENT_READ, on_accept)
+    on_accept = on_new_conn(args)  # 设定当新连接到来时触发的事件
+    selector.register(sock, EVENT_READ, on_accept)  #注册事件
     try:
         while True:
             events = selector.select()  # 程序会在这里阻塞等待事件发生
