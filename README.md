@@ -150,14 +150,11 @@ Shadowsocks协议是隧道客户端和隧道服务器之间采取的通信协议
 
 ### 错误处理
 
-超时处理
-
-其他错误处理：
-
-可能出现的问题：
-连接被重置：ConnectionResetError
-破碎的管道：
-
+* 超时处理：暂无
+* 其他错误处理：使用套接字读写时，可能出现ConnectionError。
+可能是对方重置了连接或者提前关闭。在Python中，`ConnectionError`是`BrokenPipeError`,
+`ConnectionAbortedError`,`ConnectionRefusedError`和`ConnectionResetError`的父类。
+只需要捕获这个异常并销毁对应的连接即可。
 
 ## 参考资料：
 1. [PyCryptodome 3.8.0 documentation](https://pycryptodome.readthedocs.io/en/latest/)

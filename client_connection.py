@@ -135,7 +135,7 @@ class Connection:
                 self.remote_sock.send(c_head)
 
             # 连接失败，此时发送会失败
-            except BrokenPipeError:
+            except ConnectionError:
                 logging.debug("[{0}]远程连接{1}:{2}失败".format(
                     self.id, self.remote_addr[0], self.remote_addr[1]))
                 self.destory()
