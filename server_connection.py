@@ -84,7 +84,7 @@ class Connection:
             # 如果本地套接字提前终止，就销毁这个连接
             if not data:
                 logging.warning("[{0}]远程连接{1}:{2}提前终止".format(
-                    self.id, self.remote_addr[0], self.remote_addr[1]))
+                    self.id, self.local_addr[0], self.local_addr[1]))
                 self.destory()
                 return
 
@@ -125,6 +125,7 @@ class Connection:
             self.remote_addr = ip, self.remote_addr[1]
 
             self.remote_sock = socket()
+            self.remote_sock.setblocking(False)
             try:
                 self.remote_sock.connect(self.remote_addr)
             except BlockingIOError:

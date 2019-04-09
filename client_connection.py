@@ -1,11 +1,9 @@
 import logging
-import struct
 from selectors import EVENT_READ, EVENT_WRITE, DefaultSelector
-from socket import (AF_INET, AF_INET6, SHUT_WR, SO_REUSEADDR, SOCK_STREAM,
-                    SOL_SOCKET, SOL_TCP, TCP_NODELAY, inet_pton, socket)
+from socket import SHUT_WR, SO_REUSEADDR, TCP_NODELAY, socket, SOL_TCP, SOL_SOCKET
 
-from common import (BadHttpHeader, NoAcceptableMethods, is_ip,
-                    make_shadow_head, parse_http, to_bytes, to_str)
+from common import (BadHttpHeader, NoAcceptableMethods, make_shadow_head,
+                    parse_http, to_bytes)
 from encypt import aes_256_cfb_Cyptor
 
 selector = DefaultSelector()
@@ -55,7 +53,7 @@ class Connection:
 
         self.cryptor = aes_256_cfb_Cyptor(to_bytes(passwd))
 
-        self.upstream_buffer = b''   # 从本地读，向远程写
+        self.upstream_buffer = b''  # 从本地读，向远程写
         self.downstream_buffer = b''  # 从远程读，向本地写
 
         self.local_closed = False
@@ -71,6 +69,7 @@ class Connection:
 
         对每一个状态，为套接字注册相应的回调函数。
         '''
+
         def init_on_local_read(key, mask):
             data = self.local_sock.recv(1024)
 
@@ -91,7 +90,8 @@ class Connection:
                     self.dst_addr = parse_http(
                         self.upstream_buffer)  # (ip_addr, port)
                     logging.info("[{0}]本地请求连接到 {1}:{2}".format(
-                        self.id, self.dst_addr[0].decode('utf-8'), self.dst_addr[1]))
+                        self.id, self.dst_addr[0].decode('utf-8'),
+                        self.dst_addr[1]))
                     self.remote_sock = socket()
                     self.remote_sock.setblocking(False)
                     self.remote_sock.setsockopt(SOL_TCP, TCP_NODELAY, 1)
@@ -109,8 +109,8 @@ class Connection:
                     logging.error("[{0}]解析本地连接隧道请求失败：非HTTP头部".format(self.id))
                     self.destory()
                 except NoAcceptableMethods:
-                    logging.error(
-                        "[{0}]解析本地连接隧道头请求失败：不支持的HTTP请求方法".format(self.id))
+                    logging.error("[{0}]解析本地连接隧道头请求失败：不支持的HTTP请求方法".format(
+                        self.id))
                     self.destory()
 
         def rconn_on_local_read(key, mask):
@@ -118,8 +118,8 @@ class Connection:
             本地可读，说明本地出现了错误，此时销毁这个连接。
             '''
             _ = self.local_sock.recv(1024)
-            logging.debug("[{0}]本地连接{1}:{2}提前断开连接".format(self.id,
-                                                          self.local_addr[0], self.local_addr[1]))
+            logging.debug("[{0}]本地连接{1}:{2}提前断开连接".format(
+                self.id, self.local_addr[0], self.local_addr[1]))
 
             self.destory()
 
@@ -128,7 +128,7 @@ class Connection:
             远程套接字变为可写，说明连接已经建立
             '''
             shadow_head = make_shadow_head(self.dst_addr)
-            #加密shadow协议头
+            # 加密shadow协议头
             c_head = self.cryptor.cipher(shadow_head)
 
             try:
@@ -149,7 +149,8 @@ class Connection:
                 b'HTTP/1.1 200 Connection Established\r\n\r\n')
 
             logging.debug("[{0}]向远程服务器发送{1}:{2} {3}字节Shadow头".format(
-                self.id, self.remote_addr[0], self.remote_addr[1], len(c_head)))
+                self.id, self.remote_addr[0], self.remote_addr[1],
+                len(c_head)))
             self.update_state(self.S_ESTABLISHED)
 
         def establised_on_local_read(key, mask):
@@ -161,7 +162,7 @@ class Connection:
             if data is None:
                 return
 
-            if not data:   #b''
+            if not data:  #b''
                 logging.info("[{0}]本地关闭连接".format(self.id))
                 if self.remote_closed == True:
                     self.destory()
@@ -175,7 +176,8 @@ class Connection:
             ciphered = self.cryptor.cipher(data)
             self.remote_sock.send(ciphered)
             logging.debug("[{0}]向远程服务器{1}:{2}发送{3}字节数据".format(
-                self.id, self.remote_addr[0], self.remote_addr[1], len(ciphered)))
+                self.id, self.remote_addr[0], self.remote_addr[1],
+                len(ciphered)))
 
         def establised_on_remote_read(key, mask):
             '''
@@ -194,7 +196,6 @@ class Connection:
                     return
                 self.local_sock.shutdown(SHUT_WR)
                 selector.unregister(self.remote_sock)
-
                 self.remote_closed = True
                 return
 
@@ -209,10 +210,10 @@ class Connection:
         if new_state == self.S_INIT:  #注册新的事件
             selector.register(self.local_sock, EVENT_READ, init_on_local_read)
 
-        elif new_state == self.S_REMOTE_CONNECT:#修改本地事件处理函数 注册远程事件处理函数
+        elif new_state == self.S_REMOTE_CONNECT:  #修改本地事件处理函数 注册远程事件处理函数
             selector.modify(self.local_sock, EVENT_READ, rconn_on_local_read)
-            selector.register(self.remote_sock,
-                              EVENT_WRITE, rconn_on_remote_write)
+            selector.register(self.remote_sock, EVENT_WRITE,
+                              rconn_on_remote_write)
 
         elif new_state == self.S_ESTABLISHED:
             selector.modify(self.local_sock, EVENT_READ,
@@ -221,8 +222,8 @@ class Connection:
                             establised_on_remote_read)
 
         self.state = new_state
-        logging.debug("[{0}]切换到状态{1}".format(
-            self.id, self.statemap[self.state]))
+        logging.debug("[{0}]切换到状态{1}".format(self.id,
+                                             self.statemap[self.state]))
 
     def _recv_from_sock(self, sock):
         if sock == self.local_sock:
@@ -310,10 +311,12 @@ def main(args):
 
 
 if __name__ == "__main__":
+
     class Data:
         def __init__(self):
             self.local = 7301
             self.host = '127.0.0.1'
             self.port = 8888
             self.password = '1234567'
+
     main(Data())
