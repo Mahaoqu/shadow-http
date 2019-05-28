@@ -5,16 +5,17 @@ import socket
 import struct
 import sys
 
-import server_connection
+import server_async
+
 
 def check_python():
     '''
     检查Python版本。
 
-    仅支持Python3.4及以上版本。
+    仅支持Python3.7及以上版本。
     '''
-    if sys.version_info < (3, 4):
-        print('抱歉，仅支持Python 3.4 及以上版本.')
+    if sys.version_info < (3, 7):
+        print('抱歉，仅支持Python 3.7 及以上版本.')
         exit(1)
 
 
@@ -48,7 +49,7 @@ def get_config():
 def main():
     check_python()
     args = get_config()
-    server_connection.main(args)
+    server_async.main(args)
 
 
 if __name__ == "__main__":

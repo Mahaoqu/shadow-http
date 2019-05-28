@@ -1,5 +1,10 @@
-from socket import AF_INET, AF_INET6, inet_pton, inet_ntop
+import asyncio
+import logging
 import struct
+from socket import AF_INET, AF_INET6, inet_ntop, inet_pton, IPPROTO_TCP
+
+from encypt import aes_256_cfb_Cyptor
+
 
 def compat_ord(s):
     if type(s) == int:
@@ -11,6 +16,7 @@ def compat_chr(d):
     if bytes == str:
         return chr(d)
     return bytes([d])
+
 
 def to_bytes(s):
     if bytes != str:
@@ -88,7 +94,7 @@ def make_shadow_head(addr):
     return head
 
 
-def parse_shadow_head(head):
+async def parse_shadow_head(head):
     '''
     解析Shadow头，并返回主机名，端口号和头部长度
     '''
@@ -109,16 +115,73 @@ def parse_shadow_head(head):
     elif atype == 0x03:
         addr_len = head[length]
         length += 1
-        host = head[length:length + addr_len]
+        hostname = head[length:length + addr_len]
+        logging.debug(f'解析域名{hostname}...')
         length = length + addr_len
+        host = await asyncio.get_event_loop().getaddrinfo(hostname, None, proto=IPPROTO_TCP,
+                                                          family=AF_INET)
+        host = host[0][4][0]
+        logging.debug(f'解析成功，{hostname}的地址是{host}')
 
     else:
         raise BadShadowHeader
 
-    port = struct.unpack('!H', head[length:length + 2]) 
+    port = struct.unpack('!H', head[length:length + 2])[0]
     length += 2
 
-    return host, port[0], length
+    logging.debug(f'请求访问{host}:{port}')
+    return host, port, length
+
+
+# def parse_shadow_head(head):
+#     '''
+#     解析Shadow头，并返回主机名，端口号和头部长度
+#     '''
+#     atype = head[0]
+#     length = 1
+
+#     # IPv4
+#     if atype == 0x01:
+#         host = inet_ntop(AF_INET, head[length:length + 4])
+#         length += 4
+
+#     # IPv6
+#     elif atype == 0x04:
+#         host = inet_ntop(AF_INET, head[length:length + 16])
+#         length += 16
+
+#     # 域名
+#     elif atype == 0x03:
+#         addr_len = head[length]
+#         length += 1
+#         host = head[length:length + addr_len]
+#         length = length + addr_len
+
+#     else:
+#         raise BadShadowHeader
+
+#     port = struct.unpack('!H', head[length:length + 2])
+#     length += 2
+
+#     return host, port[0], length
+
+
+async def cipher_relay(reader: asyncio.StreamReader, writer: asyncio.StreamWriter, cryptor: aes_256_cfb_Cyptor):
+    while not reader.at_eof():
+        data: bytes = await reader.read(2048)
+        logging.debug(f'收到{len(data)}字节数据')
+        writer.write(cryptor.cipher(data))
+        await writer.drain()
+        logging.debug(f'发送{len(data)}字节加密数据')
+
+
+async def decipher_relay(reader: asyncio.StreamReader, writer: asyncio.StreamWriter, cryptor: aes_256_cfb_Cyptor):
+    while not reader.at_eof():
+        data: bytes = await reader.read(2048)
+        logging.debug(f'收到{len(data)}字节加密数据')
+        writer.write(cryptor.decipher(data))
+        await writer.drain()
+        logging.debug(f'发送{len(data)}字节数据')
 
 
 def test_shadow(addr):
